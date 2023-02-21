@@ -13,6 +13,8 @@ import subprocess
 import urllib.parse
 from typing import List, Tuple, Dict, Optional, Union, cast, Sequence  # pylint: disable=unused-import
 
+gsutil_path = "gsutil"
+
 
 def ls(pattern: str, dont_recurse: bool = False) -> List[str]:  # pylint: disable=invalid-name
     """
@@ -25,7 +27,7 @@ def ls(pattern: str, dont_recurse: bool = False) -> List[str]:  # pylint: disabl
     :param dont_recurse: -d option of gsutil ls
     :return: list of URLs according to the given pattern
     """
-    cmd = ['gsutil', '-m', 'ls']
+    cmd = [gsutil_path, '-m', 'ls']
     if dont_recurse:
         cmd.append("-d")
     cmd.append(pattern)
@@ -38,9 +40,8 @@ def ls(pattern: str, dont_recurse: bool = False) -> List[str]:  # pylint: disabl
     if proc.returncode == 0:
         return [line.strip() for line in out.split('\n') if line.strip() != '']
 
-    raise RuntimeError("gsutil failed: command was: {!r}\n, stderr:\n{}".format(" ".join(
+    raise RuntimeError("gsutil failed: command was: {}\n, stderr:\n{}".format(" ".join(
         [shlex.quote(part) for part in cmd]), err))
-
 
 def ls_many(patterns: List[str], dont_recurse: bool = False) -> List[List[str]]:
     """
@@ -93,7 +94,7 @@ def long_ls(pattern: str, dont_recurse: bool = False) -> List[Entry]:
     :param dont_recurse: -d option of gsutil ls
     :return: listed entries
     """
-    cmd = ['gsutil', '-m', 'ls', '-l']
+    cmd = [gsutil_path, '-m', 'ls', '-l']
     if dont_recurse:
         cmd.append("-d")
     cmd.append(pattern)
@@ -104,7 +105,7 @@ def long_ls(pattern: str, dont_recurse: bool = False) -> List[Entry]:
         return []
 
     if proc.returncode != 0:
-        raise RuntimeError("gsutil failed: command was: {!r}\n, stderr:\n{}".format(" ".join(
+        raise RuntimeError("gsutil failed: command was: {}\n, stderr:\n{}".format(" ".join(
             [shlex.quote(part) for part in cmd]), err))
 
     entries = []  # type: List[Entry]
@@ -174,11 +175,11 @@ def copy(pattern: Union[str, pathlib.Path],
     pattern_str = str(pattern)
     target_str = str(target)
 
-    if not target_str.startswith('gs://') and no_clobber:
-        raise NotImplementedError(
-            "gsutil cp allows no-clobber (-n) only for bucket objects, but not for the target: {!r}".format(target_str))
+    # if not target_str.startswith('gs://') and no_clobber:
+    #     raise NotImplementedError(
+    #         "gsutil cp allows no-clobber (-n) only for bucket objects, but not for the target: {!r}".format(target_str))
 
-    cmd = ['gsutil']  # type: List[str]
+    cmd = [gsutil_path]  # type: List[str]
     if quiet:
         cmd.append('-q')
     if multithreaded:
@@ -198,12 +199,87 @@ def copy(pattern: Union[str, pathlib.Path],
     _, err = proc.communicate()
 
     if proc.returncode != 0:
-        if err.strip() == "CommandException: No URLs matched: {!r}".format(pattern):
+        if err.strip() == "CommandException: No URLs matched: {}".format(pattern):
             raise FileNotFoundError("Copy to {!r} failed since no file matched the pattern: {!r}".format(
                 target_str, pattern_str))
         else:
-            raise RuntimeError("gsutil failed: command was:\n{!r}\nstderr:\n{}".format(
+            raise RuntimeError("gsutil failed: command was:\n{}\nstderr:\n{}".format(
                 " ".join([shlex.quote(part) for part in cmd]), err))
+
+def rsync(pattern: Union[str, pathlib.Path],
+         target: Union[str, pathlib.Path],
+         quiet: bool = False,
+         multithreaded: bool = False,
+         delete_extras: bool = False,
+         recursive: bool = False,
+         no_clobber: bool = False,
+         preserve_posix: bool = False) -> None:
+    # pylint: disable=too-many-arguments
+    """
+    copies all the sources matching the `pattern` to the target.
+
+    :param pattern: source pattern (URL or a path)
+    :param target: target URL or a path
+    :param quiet: if set, makes gsutil quiet
+    :param multithreaded: use multithreading to copy multiple files simultaneously
+    :param delete_extras: delete any files in the destination that do not exist in the source. Ensures source and data are identical.
+    :param recursive:
+        (from https://cloud.google.com/storage/docs/gsutil/commands/cp)
+        Causes directories, buckets, and bucket subdirectories to be copied recursively. If you neglect to use this
+        option for an upload, gsutil will copy any files it finds and skip any directories. Similarly, neglecting to
+        specify this option for a download will cause gsutil to copy any objects at the current bucket directory level,
+        and skip any subdirectories.
+    :param no_clobber:
+        (from https://cloud.google.com/storage/docs/gsutil/commands/cp)
+        When specified, existing files or objects at the destination will not be overwritten. Any items that are skipped
+        by this option will be reported as being skipped. This option will perform an additional GET request to check if
+        an item exists before attempting to upload the data. This will save retransmitting data, but the additional HTTP
+        requests may make small object transfers slower and more expensive.
+    :param preserve_posix:
+        (from https://cloud.google.com/storage/docs/gsutil/commands/cp)
+        Causes POSIX attributes to be preserved when objects are copied. With this feature enabled, gsutil cp will copy
+        fields provided by stat. These are the user ID of the owner, the group ID of the owning group, the mode
+        (permissions) of the file, and the access/modification time of the file. For downloads, these attributes will
+        only be set if the source objects were uploaded with this flag enabled.
+
+    :return:
+    """
+    pattern_str = str(pattern)
+    target_str = str(target)
+
+    # if not target_str.startswith('gs://') and no_clobber:
+    #     raise NotImplementedError(
+    #         "gsutil cp allows no-clobber (-n) only for bucket objects, but not for the target: {!r}".format(target_str))
+
+    cmd = [gsutil_path]  # type: List[str]
+    if quiet:
+        cmd.append('-q')
+    if multithreaded:
+        cmd.append('-m')
+    cmd.append('rsync')
+    if delete_extras:
+        cmd.append('-d')
+    if recursive:
+        cmd.append('-r')
+    if no_clobber:
+        cmd.append('-n')
+    if preserve_posix:
+        cmd.append('-P')
+
+    cmd.append(pattern_str)
+    cmd.append(target_str)
+
+    proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True)
+    _, err = proc.communicate()
+
+    if proc.returncode != 0:
+        if err.strip() == "CommandException: No URLs matched: {}".format(pattern):
+            raise FileNotFoundError("Rsync to {!r} failed since no file matched the pattern: {!r}".format(
+                target_str, pattern_str))
+        else:
+            raise RuntimeError("gsutil failed: command was:\n{}\nstderr:\n{}".format(
+                " ".join([shlex.quote(part) for part in cmd]), err))
+
 
 
 def copy_many_to_one(patterns: Sequence[Union[str, pathlib.Path]],
@@ -255,9 +331,9 @@ def copy_many_to_one(patterns: Sequence[Union[str, pathlib.Path]],
 
     target_str = str(target)
 
-    if not target_str.startswith('gs://') and no_clobber:
-        raise NotImplementedError(
-            "gsutil cp allows no-clobber (-n) only for bucket objects, but not for the target: {!r}".format(target_str))
+    # if not target_str.startswith('gs://') and no_clobber:
+    #     raise NotImplementedError(
+    #         "gsutil cp allows no-clobber (-n) only for bucket objects, but not for the target: {!r}".format(target_str))
 
     if target_str.startswith('/'):
         if not os.path.exists(target_str):
@@ -267,7 +343,7 @@ def copy_many_to_one(patterns: Sequence[Union[str, pathlib.Path]],
         if not os.path.isdir(target_str):
             raise NotADirectoryError("To copy many-to-one, the target must be a directory: {!r}".format(target_str))
 
-    cmd = ['gsutil']  # type: List[str]
+    cmd = [gsutil_path]  # type: List[str]
     if quiet:
         cmd.append('-q')
     if multithreaded:
@@ -289,10 +365,10 @@ def copy_many_to_one(patterns: Sequence[Union[str, pathlib.Path]],
 
     if proc.returncode != 0:
         if err.strip().startswith("CommandException: No URLs matched:"):
-            raise FileNotFoundError("Copy to {!r} failed since no file matched the pattern: {!r}".format(
+            raise FileNotFoundError("Copy to {!r} failed since no file matched the pattern: {}".format(
                 target_str, err.strip()))
         else:
-            raise RuntimeError("gsutil failed: command was:\n{!r}\nstderr:\n{}".format(
+            raise RuntimeError("gsutil failed: command was:\n{}\nstderr:\n{}".format(
                 " ".join([shlex.quote(part) for part in cmd]), err))
 
 
@@ -392,10 +468,10 @@ def copy_many_to_many(patterns_targets: Sequence[Tuple[Union[str, pathlib.Path],
     else:
         patterns_targets_strs = cast(List[Tuple[str, str]], patterns_targets)
 
-    for pattern, target in patterns_targets_strs:
-        if not target.startswith('gs://') and no_clobber:
-            raise NotImplementedError(
-                "gsutil cp allows no-clobber (-n) only for bucket objects, but not for the target: {!r}".format(target))
+    # for pattern, target in patterns_targets_strs:
+    #     if not target.startswith('gs://') and no_clobber:
+    #         raise NotImplementedError(
+    #             "gsutil cp allows no-clobber (-n) only for bucket objects, but not for the target: {!r}".format(target))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
         futures = []  # type: List[concurrent.futures.Future]
@@ -460,7 +536,7 @@ def remove(pattern: str, quiet: bool = False, multithreaded: bool = False, recur
         will delete the bucket. This option implies the -a option and will delete all object versions.
     :return:
     """
-    cmd = ['gsutil']
+    cmd = [gsutil_path]
     if quiet:
         cmd.append('-q')
     if multithreaded:
@@ -480,7 +556,7 @@ def read_text(url: str, encoding: str = 'utf-8') -> str:
     :param encoding: used to decode the text, defaults to 'utf-8'
     :return: text of the file
     """
-    cmd = ['gsutil', 'cat', url]
+    cmd = [gsutil_path, 'cat', url]
 
     return subprocess.check_output(cmd).decode(encoding)
 
@@ -492,7 +568,7 @@ def read_bytes(url: str) -> bytes:
     :param url: to the file on the storage
     :return: content of the file
     """
-    cmd = ['gsutil', 'cat', url]
+    cmd = [gsutil_path, 'cat', url]
 
     return subprocess.check_output(cmd)
 
@@ -507,7 +583,7 @@ def write_text(url: str, text: str, encoding: str = 'utf-8', quiet: bool = False
     :param quiet: if set, makes gsutil quiet
     :return:
     """
-    cmd = ['gsutil']
+    cmd = [gsutil_path]
 
     if quiet:
         cmd += ['-q']
@@ -532,7 +608,7 @@ def write_bytes(url: str, data: bytes, quiet: bool = False) -> None:
     :param quiet: if set, makes gsutil quiet
     :return:
     """
-    cmd = ['gsutil']
+    cmd = [gsutil_path]
 
     if quiet:
         cmd += ['-q']
@@ -545,7 +621,7 @@ def write_bytes(url: str, data: bytes, quiet: bool = False) -> None:
     proc.communicate(input=data)
 
     if proc.returncode != 0:
-        raise RuntimeError("Failed to write to the object: {!r}".format(url))
+        raise RuntimeError("Failed to write to the object: {}".format(url))
 
 
 class Stat:
@@ -595,9 +671,9 @@ def stat(url: str) -> Optional[Stat]:
     # pylint: disable=too-many-branches
     with contextlib.ExitStack() as exit_stack:
         proc = subprocess.Popen(
-            ['gsutil', 'stat', url], universal_newlines=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+            [gsutil_path, 'stat', url], universal_newlines=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
 
-        exit_stack.callback(callback=lambda p=proc: _terminate_or_kill(proc=p, timeout=5))
+        exit_stack.callback((lambda p=proc: _terminate_or_kill(proc=p, timeout=5)))
 
         stdout, stderr = proc.communicate()
 
