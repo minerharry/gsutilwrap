@@ -12,9 +12,13 @@ import shlex
 import subprocess
 import urllib.parse
 from typing import List, Tuple, Dict, Optional, Union, cast, Sequence  # pylint: disable=unused-import
+import shutil
 
 gsutil_path = "gsutil"
-
+try:
+    gsutil_path = shutil.which("gsutil")
+except:
+    pass
 
 def ls(pattern: str, dont_recurse: bool = False) -> List[str]:  # pylint: disable=invalid-name
     """
